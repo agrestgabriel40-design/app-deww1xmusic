@@ -1,1 +1,43 @@
+name: Lane iOS build
 
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack Lane source
+        run: |
+          unzip -q Lane-iOS-source.zip -d lane-src
+          test -f lane-src/Lane.xcodeproj/project.pbxproj
+
+      - name: Select Xcode 27
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Build unsigned iPhone archive
+        working-directory: lane-src
+        run: |
+          xcodebuild archive \
+            -project Lane.xcodeproj \
+            -scheme Lane \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$GITHUB_WORKSPACE/Lane.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lane-iOS-unsigned
+          path: Lane.xcarchive
+          retention-days: 7
