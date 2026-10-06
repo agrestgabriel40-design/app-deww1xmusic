@@ -2,42 +2,64 @@ name: Lane iOS build
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, master ]
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Unpack Lane source
         run: |
-          unzip -q Lane-iOS-source.zip -d lane-src
-          test -f lane-src/Lane.xcodeproj/project.pbxproj
+          rm -rf lane-source
+          mkdir -p lane-source
+          unzip -q Lane-iOS-source.zip -d lane-source
+          echo "Source contents:"
+          find lane-source -maxdepth 3 -type f | head -100
 
-      - name: Select Xcode 27
+      - name: Select installed Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcode-select -p
           xcodebuild -version
+          xcodebuild -showsdks | grep -i "iphoneos" || true
+
+      - name: Find Xcode project
+        run: |
+          PROJECT=$(find lane-source -name "*.xcodeproj" -print -quit)
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: No .xcodeproj found in Lane-iOS-source.zip"
+            exit 1
+          fi
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          echo "Found: $PROJECT"
 
       - name: Build unsigned iPhone archive
-        working-directory: lane-src
         run: |
+          mkdir -p build
+          SCHEME=$(xcodebuild -list -project "$PROJECT" 2>/dev/null | \
+            awk '/Schemes:/{flag=1;next} flag && NF{gsub(/^ +| +$/,""); print; exit}')
+          if [ -z "$SCHEME" ]; then
+            echo "ERROR: Could not determine Xcode scheme"
+            exit 1
+          fi
+          echo "Using scheme: $SCHEME"
+
           xcodebuild archive \
-            -project Lane.xcodeproj \
-            -scheme Lane \
-            -configuration Release \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
             -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$GITHUB_WORKSPACE/Lane.xcarchive" \
+            -configuration Release \
+            -archivePath "$PWD/build/Lane.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: Lane-iOS-unsigned
-          path: Lane.xcarchive
-          retention-days: 7
+          name: Lane-iPhone-archive
+          path: build/Lane.xcarchive
+          if-no-files-found: error
